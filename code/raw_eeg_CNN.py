@@ -11,10 +11,9 @@ from torch.utils.tensorboard import SummaryWriter
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import confusion_matrix
-import torchviz
-import numpy as np
-from io import BytesIO
-import torchvision
+
+
+
 from PIL import Image
 import io
 import torchvision.transforms as transforms
@@ -88,30 +87,52 @@ criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=0.001)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.95)
 
+# 记录训练损失和测试准确率
+train_losses = []
+test_accuracies = []
 
 # Train the model
 def train(writer):
     total_step = len(train_data_loader)
     batch_cnt = 0
     for epoch in range(num_epochs):
+        running_loss = 0.0
+        correct_train = 0
+        total_train = 0
         for i, (features, labels) in enumerate(train_data_loader):
             features = features.to(device)
             labels = labels.to(device)
             outputs = model(features)
             loss = criterion(outputs, labels)
             batch_cnt += 1
+            running_loss += loss.item()
             writer.add_scalar('train_loss', loss, batch_cnt)
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            if (i + 1) % 100 == 0:
-                print(f'Epoch [{epoch + 1}/{num_epochs}], Step [{i + 1}/{total_step}], Loss: {loss.item():.4f}')
+
+            # 统计训练准确率
+            _, predicted = torch.max(outputs.data, 1)
+            total_train += labels.size(0)
+            correct_train += (predicted == labels).sum().item()
+
+        avg_train_loss = running_loss / len(train_data_loader)
+        avg_train_accuracy = 100 * correct_train / total_train
+        train_losses.append(avg_train_loss)  # 记录训练损失
+        test_accuracies.append(avg_train_accuracy)  # 记录训练准确率
+
+        print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {avg_train_loss:.4f}, Train Accuracy: {avg_train_accuracy:.2f}%')
+
         scheduler.step()
 
         # 在每个epoch结束后进行测试，传递当前的epoch
         test(writer, epoch)  # 传递 epoch 参数给 test()
 
     torch.save(model.state_dict(), './code/model/model.ckpt')
+
+    # 绘制损失和准确率折线图
+    plot_metrics()
 
 
 # Test the model
@@ -131,23 +152,42 @@ def test(writer, epoch, is_load=False):
             correct += (predicted == labels).sum().item()
         print(f'Test Accuracy after Epoch {epoch} is {100 * correct / total:.2f}%')
 
+        # 记录测试准确率到TensorBoard
+        writer.add_scalar('test_accuracy', 100 * correct / total, epoch)
 
 
-def plot_confusion_matrix(cm, epoch, writer):
-    plt.figure(figsize=(6, 5))
-    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False, 
-                xticklabels=["Class 0", "Class 1", "Class 2"], yticklabels=["Class 0", "Class 1", "Class 2"])
-    plt.xlabel('Predicted')
-    plt.ylabel('True')
-    plt.title(f'Confusion Matrix - Epoch {epoch}')
-    plt.savefig(f'./code/logs/confusion_matrix_epoch_{epoch}.png')
+# 绘制损失和准确率折线图
+def plot_metrics():
+    # 绘制损失图
+    plt.figure()
+    plt.plot(range(1, num_epochs + 1), train_losses, label='Train Loss')
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Train Loss over Epochs')
+    plt.legend()
+    plt.savefig('./code/logs/train_loss.png')  # 保存到文件
     plt.close()
 
-    # Log confusion matrix image to TensorBoard
-    # 在 plot_confusion_matrix 中调用
-    writer.add_image('Confusion Matrix', plt_to_image(plt), epoch)
+    # 绘制准确率图
+    plt.figure()
+    plt.plot(range(1, num_epochs + 1), test_accuracies, label='Test Accuracy')
+    plt.xlabel('Epoch')
+    plt.ylabel('Accuracy (%)')
+    plt.title('Test Accuracy over Epochs')
+    plt.legend()
+    plt.savefig('./code/logs/test_accuracy.png')  # 保存到文件
+    plt.close()
+
+    # 将图片添加到TensorBoard
+    writer.add_image('Train Loss', plt_to_image(plt), 0)
+    writer.add_image('Test Accuracy', plt_to_image(plt), 0)
 
 
+# 将Matplotlib图像转换为TensorBoard可以读取的格式
+from PIL import Image
+import torchvision.transforms as transforms
+import matplotlib.pyplot as plt
+import io
 
 def plt_to_image(plt):
     # 将当前的 plt 图像保存到内存中的 BytesIO
@@ -163,36 +203,6 @@ def plt_to_image(plt):
     return transform(image)
 
 
-def plot_gradient_distribution(model, epoch, writer):
-    all_grads = []
-    for param in model.parameters():
-        if param.grad is not None:
-            all_grads.append(param.grad.flatten().cpu().detach().numpy())
-    all_grads = np.concatenate(all_grads)
-
-    plt.figure(figsize=(6, 5))
-    plt.hist(all_grads, bins=50, color='blue', alpha=0.7)
-    plt.title(f'Gradient Distribution - Epoch {epoch}')
-    plt.xlabel('Gradient Value')
-    plt.ylabel('Frequency')
-    plt.savefig(f'./code/logs/gradient_distribution_epoch_{epoch}.png')
-    plt.close()
-
-    # Log gradient distribution image to TensorBoard
-    writer.add_image('Gradient Distribution', plt_to_image(plt), epoch)
-
-
-# 绘制模型结构图
-def plot_model_structure(model, sample_input):
-    y = model(sample_input)
-    dot = torchviz.make_dot(y, params=dict(model.named_parameters()))
-    dot.render("model_structure", format="png")
-    print("Model structure saved as model_structure.png")
-
-
-# 在训练开始时，绘制模型结构图
-sample_input = torch.randn(1, 1, 62, 200).to(device)
-# plot_model_structure(model, sample_input)
 
 # 初始化TensorBoard的writer
 writer = SummaryWriter('../log')
