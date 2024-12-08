@@ -26,12 +26,8 @@ train_feature, train_label, test_feature, test_label = subject_independent_data_
                                                                                       {'2', '6', '9'})
 
 desire_shape = [1, 62, 200]
-train_data = RawEEGDataset(train_feature[:int(len(train_feature) * 0.01)], 
-                           train_label[:int(len(train_label) * 0.01)], 
-                           desire_shape)
-test_data = RawEEGDataset(test_feature[:int(len(test_feature) * 0.01)], 
-                          test_label[:int(len(test_label) * 0.01)], 
-                          desire_shape)
+train_data = RawEEGDataset(train_feature, train_label, desire_shape)
+test_data = RawEEGDataset(test_feature, test_label, desire_shape)
 
 # 超参数设置
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -39,6 +35,7 @@ num_epochs = 30
 num_classes = 3
 batch_size = 24
 learning_rate = 0.0001
+
 
 # Data loader
 train_data_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, drop_last=False)
